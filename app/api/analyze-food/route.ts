@@ -1,22 +1,10 @@
 import { NextResponse } from "next/server"
-import { FOOD_DB } from "@/lib/foods"
 
 export const runtime = "nodejs"
 
 type FoodItem = {
   name: string
   portion: string
-  calories: number
-  protein: number
-  carbs: number
-  fat: number
-}
-
-type AIItem = {
-  name: string
-  portion: string
-  quantity: number
-  unit: string
   calories: number
   protein: number
   carbs: number
@@ -37,29 +25,37 @@ const foodSchema = {
         required: [
           "name",
           "portion",
-          "quantity",
-          "unit",
           "calories",
           "protein",
           "carbs",
           "fat",
         ],
         properties: {
-          name: { type: "string" },
-          portion: { type: "string" },
-          quantity: { type: "number" },
-          unit: { type: "string" },
-          calories: { type: "number" },
-          protein: { type: "number" },
-          carbs: { type: "number" },
-          fat: { type: "number" },
+          name: {
+            type: "string",
+          },
+          portion: {
+            type: "string",
+          },
+          calories: {
+            type: "number",
+          },
+          protein: {
+            type: "number",
+          },
+          carbs: {
+            type: "number",
+          },
+          fat: {
+            type: "number",
+          },
         },
       },
     },
   },
 }
 
-function isAIItem(value: unknown): value is AIItem {
+function isFoodItem(value: unknown): value is FoodItem {
   if (!value || typeof value !== "object") return false
 
   const item = value as Record<string, unknown>
@@ -67,50 +63,15 @@ function isAIItem(value: unknown): value is AIItem {
   return (
     typeof item.name === "string" &&
     typeof item.portion === "string" &&
-    typeof item.quantity === "number" &&
-    Number.isFinite(item.quantity) &&
-    item.quantity >= 0 &&
-    typeof item.unit === "string" &&
-    ["calories", "protein", "carbs", "fat"].every(
-      (key) =>
-        typeof item[key] === "number" &&
-        Number.isFinite(item[key]) &&
-        Number(item[key]) >= 0,
-    )
+    typeof item.calories === "number" &&
+    Number.isFinite(item.calories) &&
+    typeof item.protein === "number" &&
+    Number.isFinite(item.protein) &&
+    typeof item.carbs === "number" &&
+    Number.isFinite(item.carbs) &&
+    typeof item.fat === "number" &&
+    Number.isFinite(item.fat)
   )
-}
-
-function round1(n: number) {
-  return Math.round(n * 10) / 10
-}
-
-function normalize(text: string) {
-  return text
-    .toLowerCase()
-    .replace(/\s+/g, "")
-    .replace(/[，、。,.＋+]/g, "")
-}
-
-/**
- * 找 FOOD_DB 裡最接近的食物
- */
-function findFood(name: string) {
-  const target = normalize(name)
-
-  // 先找完全符合名稱
-  const exact = FOOD_DB.find((food) => normalize(food.name) === target)
-
-  if (exact) return exact
-
-  // 再用 keywords 找
-  const keywordMatch = FOOD_DB.find((food) =>
-    food.keywords.some((keyword) => {
-      const k = normalize(keyword)
-      return target.includes(k) || k.includes(target)
-    }),
-  )
-
-  return keywordMatch
 }
 
 export async function POST(request: Request) {
@@ -118,7 +79,7 @@ export async function POST(request: Request) {
 
   if (!apiKey) {
     return NextResponse.json(
-      { error: "尚未設定照片辨識服務。" },
+      { error: "尚未設定 OPENAI_API_KEY。" },
       { status: 503 },
     )
   }
@@ -149,63 +110,57 @@ export async function POST(request: Request) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: process.env.OPENAI_VISION_MODEL || "gpt-4.1-mini",
+          // 如果環境變數沒有設定，就使用這個模型
+          model:
+            process.env.OPENAI_VISION_MODEL ||
+            "gpt-4.1-mini",
 
           input: [
             {
               role: "system",
-              content: `
-你是台灣飲食紀錄助手。
+              content: [
+                {
+                  type: "input_text",
+                  text: `
+你是「台灣飲食紀錄 APP」的食物照片辨識助手。
 
-請仔細辨識照片中的食物。
+你的工作是：
+1. 仔細辨識照片中所有可以食用的主要食物。
+2. 一種食物一筆。
+3. 如果照片中有多種食物，必須分開列出。
+4. 根據照片中「實際看到的份量」估算營養。
+5. 不要把餐盤、碗、筷子、杯子、桌面、包裝當成食物。
+6. 不要因為看不清楚就回傳空白。
+7. 如果無法完全確定食物名稱，請使用最接近的常見中文名稱。
+8. 台灣常見食品請使用台灣習慣名稱，例如：
+   - 茶葉蛋
+   - 雞胸肉
+   - 雞腿
+   - 白飯
+   - 地瓜
+   - 蛋白飲
+   - 杏仁
+   - 腰果
+9. 如果照片中可以看出「半份、半顆、半隻、幾顆、幾片」，
+   portion 必須描述實際份量。
+10. 營養數值都是「照片中這一份」的估算值，不是每100克。
+11. calories 使用 kcal。
+12. protein、carbs、fat 使用公克。
+13. 所有數值必須 >= 0。
+14. 不要加入任何解釋文字，只輸出符合 JSON schema 的資料。
 
-【最重要】
-1. 每一種食物各列一筆。
-2. 必須辨識「數量／份量」。
-3. quantity 必須是數字。
-4. 如果看到「半隻、半個、半份」，quantity = 0.5。
-5. 如果看到「1/2」，quantity = 0.5。
-6. 如果看到「一顆、1顆、一個、1個、一份」，quantity = 1。
-7. 如果看到「2顆、3顆、5顆」等，必須正確輸出數字。
-8. 中文數字也要轉成數字。
-9. 不要把不同食物合併成一筆。
-10. 不要辨識餐具、桌面、包裝或背景。
-11. unit 要描述實際單位，例如：
-   - 顆
-   - 個
-   - 隻
-   - 份
-   - 杯
-   - 碗
-   - 片
-12. portion 要完整描述照片看到的份量，例如：
-   - 半隻雞腿
-   - 2顆茶葉蛋
-   - 5顆腰果
-   - 1杯蛋白飲
+例如：
+照片中有半隻雞腿和2顆茶葉蛋，
+應該分成兩筆：
+「雞腿」 portion「半隻」
+「茶葉蛋」 portion「2 顆」
 
-【營養值】
-如果不確定營養值，可以先依照片份量估算。
-但最重要的是正確辨識：
-「食物名稱 + 數量 + 單位」。
-
-例如照片看到：
-半隻雞腿 + 2顆茶葉蛋
-
-必須輸出兩筆：
-
-雞腿：
-quantity = 0.5
-unit = "隻"
-portion = "半隻雞腿"
-
-茶葉蛋：
-quantity = 2
-unit = "顆"
-portion = "2顆茶葉蛋"
-
-所有營養數值必須是非負數。
-`,
+如果照片中有：
+5顆腰果 + 5顆杏仁
+也必須分成兩筆。
+                  `.trim(),
+                },
+              ],
             },
             {
               role: "user",
@@ -213,13 +168,18 @@ portion = "2顆茶葉蛋"
                 {
                   type: "input_text",
                   text: `
-請分析這張餐點照片。
+請仔細分析這張飲食照片。
 
-特別注意：
-請仔細辨識每一種食物的「數量與份量」。
-不要只寫「雞腿」或「茶葉蛋」，
-要盡可能判斷是幾隻、幾顆、幾份。
-`,
+請辨識：
+- 所有主要食物
+- 每種食物的實際份量
+- 該份量的熱量
+- 蛋白質
+- 碳水化合物
+- 脂肪
+
+即使食物不是完全清楚，也請根據照片做合理估算，不要直接回傳空的 items。
+                  `.trim(),
                 },
                 {
                   type: "input_image",
@@ -242,16 +202,25 @@ portion = "2顆茶葉蛋"
       },
     )
 
+    // ★ 這裡很重要：
+    // 如果 API 失敗，把 OpenAI 真正回傳的錯誤印出來
     if (!response.ok) {
-      const errorText = await response.text().catch(() => "")
+      const errorText = await response.text()
+
       console.error(
-        "Food image analysis failed",
+        "Food image analysis failed:",
         response.status,
         errorText,
       )
 
       return NextResponse.json(
-        { error: "照片辨識暫時無法使用，請稍後再試。" },
+        {
+          error: `照片辨識服務錯誤 (${response.status})`,
+          detail:
+            process.env.NODE_ENV === "development"
+              ? errorText
+              : undefined,
+        },
         { status: 502 },
       )
     }
@@ -260,50 +229,69 @@ portion = "2顆茶葉蛋"
       output_text?: unknown
     }
 
-    const parsed =
-      typeof result.output_text === "string"
-        ? JSON.parse(result.output_text)
-        : null
+    console.log("Food image analysis result:", result)
 
-    const aiItems: AIItem[] = Array.isArray(parsed?.items)
-      ? parsed.items.filter(isAIItem)
-      : []
+    if (typeof result.output_text !== "string") {
+      return NextResponse.json(
+        {
+          error: "照片辨識沒有取得有效結果。",
+        },
+        { status: 502 },
+      )
+    }
 
-    const items: FoodItem[] = aiItems.map((item) => {
-      const quantity = item.quantity > 0 ? item.quantity : 1
+    let parsed: unknown
 
-      // 嘗試對應 FOOD_DB
-      const dbFood = findFood(item.name)
+    try {
+      parsed = JSON.parse(result.output_text)
+    } catch (error) {
+      console.error(
+        "Food image JSON parse error:",
+        error,
+        result.output_text,
+      )
 
-      if (dbFood) {
-        // 使用資料庫營養值 × 照片辨識出的數量
-        return {
-          name: dbFood.name,
-          portion: item.portion || `${quantity}${dbFood.unit}`,
-          calories: round1(dbFood.calories * quantity),
-          protein: round1(dbFood.protein * quantity),
-          carbs: round1(dbFood.carbs * quantity),
-          fat: round1(dbFood.fat * quantity),
-        }
-      }
+      return NextResponse.json(
+        {
+          error: "照片辨識結果格式錯誤。",
+        },
+        { status: 502 },
+      )
+    }
 
-      // 找不到資料庫食物時，保留 AI 估算
-      return {
-        name: item.name,
-        portion: item.portion,
-        calories: round1(item.calories),
-        protein: round1(item.protein),
-        carbs: round1(item.carbs),
-        fat: round1(item.fat),
-      }
+    const items =
+      parsed &&
+      typeof parsed === "object" &&
+      Array.isArray((parsed as { items?: unknown }).items)
+        ? (parsed as { items: unknown[] }).items.filter(isFoodItem)
+        : []
+
+    console.log("Food image parsed items:", items)
+
+    if (items.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            "照片中沒有辨識到有效食物，請換一張光線較好、食物較清楚的照片。",
+          items: [],
+        },
+        { status: 200 },
+      )
+    }
+
+    return NextResponse.json({
+      items,
     })
-
-    return NextResponse.json({ items })
   } catch (error) {
-    console.error("Food image analysis error", error)
+    console.error(
+      "Food image analysis exception:",
+      error,
+    )
 
     return NextResponse.json(
-      { error: "無法完成照片辨識，請稍後再試。" },
+      {
+        error: "無法完成照片辨識，請稍後再試。",
+      },
       { status: 500 },
     )
   }
