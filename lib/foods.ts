@@ -10,6 +10,8 @@ export interface FoodDef extends Nutrition {
 
 export const FOOD_DB: FoodDef[] = [
   { name: "茶葉蛋", keywords: ["茶葉蛋", "茶碗蛋"], unit: "顆", calories: 70, protein: 6, carbs: 1, fat: 5 },
+  { name: "腰果", keywords: ["腰果", "腰果仁"], unit: "顆", calories: 9, protein: 0.3, carbs: 0.5, fat: 0.7 },
+  { name: "杏仁", keywords: ["杏仁", "杏仁果"], unit: "顆", calories: 7, protein: 0.3, carbs: 0.3, fat: 0.6 },
   { name: "雞蛋", keywords: ["雞蛋", "水煮蛋", "白煮蛋", "蛋"], unit: "顆", calories: 70, protein: 6, carbs: 0.6, fat: 5 },
   { name: "蛋白飲", keywords: ["蛋白飲", "高蛋白飲", "乳清", "蛋白粉"], unit: "份", calories: 120, protein: 20, carbs: 5, fat: 1.5 },
   { name: "高蛋白牛奶", keywords: ["高蛋白牛奶", "高蛋白奶"], unit: "瓶", calories: 160, protein: 15, carbs: 13, fat: 5 },
