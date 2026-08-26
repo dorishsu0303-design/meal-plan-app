@@ -12,15 +12,31 @@ import { MEAL_LABELS, type MealType } from "@/lib/types"
 interface Row {
   name: string
   portion: string
-  calories: number
-  protein: number
-  carbs: number
-  fat: number
+
+  // 輸入時使用字串，避免小數點被 React 立即轉換掉
+  calories: string
+  protein: string
+  carbs: string
+  fat: string
+
   matched: boolean
   include: boolean
 }
 
-type NumericField = "calories" | "protein" | "carbs" | "fat"
+function toInputNumber(value: number): string {
+  if (!Number.isFinite(value)) return ""
+  return String(value)
+}
+
+function toNumber(value: string): number {
+  const cleaned = value.trim()
+
+  if (!cleaned) return 0
+
+  const n = Number.parseFloat(cleaned)
+
+  return Number.isFinite(n) && n >= 0 ? n : 0
+}
 
 export function OneLineSheet({
   open,
@@ -34,17 +50,13 @@ export function OneLineSheet({
   dateKey: string
 }) {
   const { addMeal } = useStore()
+
   const [text, setText] = useState("")
   const [rows, setRows] = useState<Row[] | null>(null)
-
-  // 暫存正在輸入中的小數字串
-  // 例如輸入 12.5 時，可以先保留 "12."
-  const [draftNumbers, setDraftNumbers] = useState<Record<string, string>>({})
 
   const reset = () => {
     setText("")
     setRows(null)
-    setDraftNumbers({})
   }
 
   const handleParse = () => {
@@ -52,83 +64,26 @@ export function OneLineSheet({
 
     setRows(
       parsed.map((p) => ({
-        ...p,
+        name: p.name,
+        portion: p.portion,
+        calories: toInputNumber(p.calories),
+        protein: toInputNumber(p.protein),
+        carbs: toInputNumber(p.carbs),
+        fat: toInputNumber(p.fat),
+        matched: p.matched,
         include: true,
       })),
     )
-
-    setDraftNumbers({})
   }
 
   const updateRow = (i: number, patch: Partial<Row>) => {
     setRows((prev) =>
       prev
         ? prev.map((r, idx) =>
-            idx === i
-              ? {
-                  ...r,
-                  ...patch,
-                }
-              : r,
+            idx === i ? { ...r, ...patch } : r,
           )
         : prev,
     )
-  }
-
-  // 更新數字欄位
-  // 可以正常輸入：
-  // 0.5
-  // 12.5
-  // 100.25
-  // 以及輸入過程中的 "0."、"12."
-  const updateNumeric = (i: number, field: NumericField, value: string) => {
-    const key = `${i}-${field}`
-
-    // 空白允許暫時存在
-    if (value === "") {
-      setDraftNumbers((prev) => ({
-        ...prev,
-        [key]: "",
-      }))
-
-      updateRow(i, {
-        [field]: 0,
-      })
-
-      return
-    }
-
-    // 只允許數字與一個小數點
-    if (!/^\d*\.?\d*$/.test(value)) {
-      return
-    }
-
-    // 保留使用者正在輸入的原始字串
-    setDraftNumbers((prev) => ({
-      ...prev,
-      [key]: value,
-    }))
-
-    // "12."、"0." 都可以暫存
-    // 真正計算時再轉成數字
-    const n = Number.parseFloat(value)
-
-    if (Number.isFinite(n) && n >= 0) {
-      updateRow(i, {
-        [field]: n,
-      })
-    }
-  }
-
-  // 顯示數字欄位
-  const getNumericValue = (i: number, field: NumericField, value: number) => {
-    const key = `${i}-${field}`
-
-    if (Object.prototype.hasOwnProperty.call(draftNumbers, key)) {
-      return draftNumbers[key]
-    }
-
-    return value === 0 ? "" : String(value)
   }
 
   const handleAdd = () => {
@@ -136,17 +91,19 @@ export function OneLineSheet({
 
     rows
       .filter((r) => r.include && r.name.trim())
-      .forEach((r) =>
+      .forEach((r) => {
         addMeal(dateKey, {
           meal,
           name: r.name.trim(),
-          portion: r.portion,
-          calories: Number.isFinite(r.calories) ? r.calories : 0,
-          protein: Number.isFinite(r.protein) ? r.protein : 0,
-          carbs: Number.isFinite(r.carbs) ? r.carbs : 0,
-          fat: Number.isFinite(r.fat) ? r.fat : 0,
-        }),
-      )
+          portion: r.portion || "1 份",
+
+          // 按下加入時才轉成 number
+          calories: toNumber(r.calories),
+          protein: toNumber(r.protein),
+          carbs: toNumber(r.carbs),
+          fat: toNumber(r.fat),
+        })
+      })
 
     reset()
     onClose()
@@ -162,16 +119,18 @@ export function OneLineSheet({
       title={`一句話輸入 · ${MEAL_LABELS[meal]}`}
     >
       <div className="space-y-4">
+
+        {/* 一句話輸入 */}
         <div>
           <TextArea
             rows={3}
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="例如：今天吃了2顆茶葉蛋、一杯蛋白飲、半隻雞腿"
+            placeholder="例如：今天吃了2顆茶葉蛋、一杯蛋白飲、半個雞腿便當"
           />
 
           <p className="mt-1.5 text-xs text-muted-foreground">
-            用「、」或空格分隔多個食物，系統會自動拆解與估算。
+            可使用「、」「＋」「+」或空格分隔多個食物，系統會自動拆解與估算。
           </p>
         </div>
 
@@ -191,6 +150,7 @@ export function OneLineSheet({
             </p>
           ) : (
             <div className="space-y-3">
+
               <p className="text-sm font-semibold text-secondary-foreground">
                 解析結果（可修改後加入），需確認的項目請填入營養值：
               </p>
@@ -200,7 +160,10 @@ export function OneLineSheet({
                   key={i}
                   className="rounded-2xl border border-border bg-background p-3"
                 >
+
+                  {/* 食物名稱 */}
                   <div className="flex items-center gap-2">
+
                     <input
                       type="checkbox"
                       checked={r.include}
@@ -228,7 +191,9 @@ export function OneLineSheet({
                       onClick={() =>
                         setRows((prev) =>
                           prev
-                            ? prev.filter((_, idx) => idx !== i)
+                            ? prev.filter(
+                                (_, idx) => idx !== i,
+                              )
                             : prev,
                         )
                       }
@@ -237,15 +202,19 @@ export function OneLineSheet({
                     >
                       <Trash2 className="size-4" />
                     </button>
+
                   </div>
 
+                  {/* 無法辨識提示 */}
                   {!r.matched ? (
                     <p className="mt-2 rounded-lg bg-chart-5/10 px-2.5 py-1.5 text-xs font-medium text-chart-5">
                       無法可靠辨識，請確認營養值
                     </p>
                   ) : null}
 
+                  {/* 營養資料 */}
                   <div className="mt-2 grid grid-cols-2 gap-2">
+
                     {/* 份量 */}
                     <label className="flex items-center gap-1 text-xs text-muted-foreground">
                       份量
@@ -267,10 +236,13 @@ export function OneLineSheet({
 
                       <TextInput
                         className="h-9"
+                        type="text"
                         inputMode="decimal"
-                        value={getNumericValue(i, "calories", r.calories)}
+                        value={r.calories}
                         onChange={(e) =>
-                          updateNumeric(i, "calories", e.target.value)
+                          updateRow(i, {
+                            calories: e.target.value,
+                          })
                         }
                       />
                     </label>
@@ -281,10 +253,13 @@ export function OneLineSheet({
 
                       <TextInput
                         className="h-9"
+                        type="text"
                         inputMode="decimal"
-                        value={getNumericValue(i, "protein", r.protein)}
+                        value={r.protein}
                         onChange={(e) =>
-                          updateNumeric(i, "protein", e.target.value)
+                          updateRow(i, {
+                            protein: e.target.value,
+                          })
                         }
                       />
                     </label>
@@ -295,10 +270,13 @@ export function OneLineSheet({
 
                       <TextInput
                         className="h-9"
+                        type="text"
                         inputMode="decimal"
-                        value={getNumericValue(i, "carbs", r.carbs)}
+                        value={r.carbs}
                         onChange={(e) =>
-                          updateNumeric(i, "carbs", e.target.value)
+                          updateRow(i, {
+                            carbs: e.target.value,
+                          })
                         }
                       />
                     </label>
@@ -309,13 +287,17 @@ export function OneLineSheet({
 
                       <TextInput
                         className="h-9"
+                        type="text"
                         inputMode="decimal"
-                        value={getNumericValue(i, "fat", r.fat)}
+                        value={r.fat}
                         onChange={(e) =>
-                          updateNumeric(i, "fat", e.target.value)
+                          updateRow(i, {
+                            fat: e.target.value,
+                          })
                         }
                       />
                     </label>
+
                   </div>
                 </div>
               ))}
@@ -326,9 +308,11 @@ export function OneLineSheet({
               >
                 加入 {includeCount} 筆到{MEAL_LABELS[meal]}
               </BigButton>
+
             </div>
           )
         ) : null}
+
       </div>
     </Sheet>
   )
