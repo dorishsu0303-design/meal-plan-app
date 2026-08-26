@@ -1,88 +1,71 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react"
+import Link from "next/link"
+import { ChevronLeft, ChevronRight, CalendarDays, ChevronDown } from "lucide-react"
 import { useStore } from "@/lib/store"
-import { sumDay } from "@/lib/nutrition"
 import { MEAL_LABELS, MEAL_ORDER, type MealType } from "@/lib/types"
+import { sumDay } from "@/lib/nutrition"
 
 function formatDate(dateKey: string) {
-  const [year, month, day] = dateKey.split("-").map(Number)
-  return `${year}/${month}/${day}`
-}
-
-function formatWeekday(dateKey: string) {
-  const [year, month, day] = dateKey.split("-").map(Number)
-  const date = new Date(year, month - 1, day)
+  const date = new Date(`${dateKey}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return dateKey
 
   const weekdays = ["日", "一", "二", "三", "四", "五", "六"]
-  return `星期${weekdays[date.getDay()]}`
+
+  return `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(
+    2,
+    "0",
+  )}/${String(date.getDate()).padStart(2, "0")}（${weekdays[date.getDay()]}）`
 }
 
-function shiftDate(dateKey: string, amount: number) {
-  const [year, month, day] = dateKey.split("-").map(Number)
-  const date = new Date(year, month - 1, day)
+function shiftDate(dateKey: string, days: number) {
+  const date = new Date(`${dateKey}T00:00:00`)
+  date.setDate(date.getDate() + days)
 
-  date.setDate(date.getDate() + amount)
-
-  const y = date.getFullYear()
-  const m = String(date.getMonth() + 1).padStart(2, "0")
-  const d = String(date.getDate()).padStart(2, "0")
-
-  return `${y}-${m}-${d}`
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
+    2,
+    "0",
+  )}-${String(date.getDate()).padStart(2, "0")}`
 }
 
-function todayString() {
+function todayKeyLocal() {
   const now = new Date()
 
-  const y = now.getFullYear()
-  const m = String(now.getMonth() + 1).padStart(2, "0")
-  const d = String(now.getDate()).padStart(2, "0")
-
-  return `${y}-${m}-${d}`
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
+    2,
+    "0",
+  )}-${String(now.getDate()).padStart(2, "0")}`
 }
 
 export default function HistoryPage() {
-  const { data, loaded } = useStore()
+  const { data, loaded, getDay } = useStore()
 
-  const today = todayString()
-  const [selectedDate, setSelectedDate] = useState(today)
+  const [selectedDate, setSelectedDate] = useState(todayKeyLocal())
 
-  const day = data.days[selectedDate]
+  const day = getDay(selectedDate)
+  const totals = sumDay(day)
 
-  const emptyDay = {
-    date: selectedDate,
-    meals: [],
-  }
+  const hasData =
+    Boolean(day.weight) ||
+    Boolean(day.water) ||
+    Boolean(day.sleep) ||
+    Boolean(day.exercise) ||
+    day.meals.length > 0
 
-  const currentDay = day ?? emptyDay
-  const totals = sumDay(currentDay)
+  const previousDay = shiftDate(selectedDate, -1)
+  const nextDay = shiftDate(selectedDate, 1)
 
-  // 取得所有曾經有資料的日期
-  const historyDates = useMemo(() => {
-    const dates = Object.keys(data.days)
+  const today = todayKeyLocal()
+  const isToday = selectedDate === today
 
-    return dates.sort((a, b) => b.localeCompare(a))
-  }, [data.days])
+  const availableDates = useMemo(() => {
+    return Object.keys(data.days)
+      .filter((key) => key <= today)
+      .sort((a, b) => b.localeCompare(a))
+  }, [data.days, today])
 
-  const hasData = currentDay.meals.length > 0 ||
-    currentDay.weight !== undefined ||
-    currentDay.water !== undefined ||
-    currentDay.sleep !== undefined ||
-    currentDay.exercise !== undefined
-
-  const goPreviousDay = () => {
-    setSelectedDate((current) => shiftDate(current, -1))
-  }
-
-  const goNextDay = () => {
-    const next = shiftDate(selectedDate, 1)
-
-    // 不允許跑到未來
-    if (next <= today) {
-      setSelectedDate(next)
-    }
-  }
+  const recentDates = availableDates.slice(0, 30)
 
   if (!loaded) {
     return (
@@ -93,15 +76,12 @@ export default function HistoryPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pb-8">
       {/* 標題 */}
       <header className="px-1">
-        <h1 className="text-2xl font-black text-foreground">
-          飲食歷史
-        </h1>
-
-        <p className="mt-0.5 text-sm font-medium text-muted-foreground">
-          查看每天的飲食與身體紀錄
+        <h1 className="text-2xl font-black text-foreground">歷史紀錄</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          每天的體重、飲食與生活紀錄都會保留下來
         </p>
       </header>
 
@@ -110,81 +90,89 @@ export default function HistoryPage() {
         <div className="flex items-center justify-between gap-2">
           <button
             type="button"
-            onClick={goPreviousDay}
-            className="flex size-11 items-center justify-center rounded-2xl bg-muted active:bg-muted/70"
+            onClick={() => setSelectedDate(previousDay)}
+            className="flex size-11 shrink-0 items-center justify-center rounded-full bg-muted active:bg-muted/70"
             aria-label="前一天"
           >
             <ChevronLeft className="size-5" />
           </button>
 
-          <div className="flex flex-1 flex-col items-center">
-            <div className="flex items-center gap-2">
-              <CalendarDays className="size-5 text-primary" />
+          <label className="flex min-w-0 flex-1 cursor-pointer items-center justify-center gap-2">
+            <CalendarDays className="size-5 text-primary" />
 
-              <input
-                type="date"
-                value={selectedDate}
-                max={today}
-                onChange={(e) => {
-                  if (e.target.value) {
-                    setSelectedDate(e.target.value)
-                  }
-                }}
-                className="rounded-xl bg-background px-2 py-1 text-center text-base font-bold text-foreground outline-none"
-              />
-            </div>
-
-            <p className="mt-1 text-xs text-muted-foreground">
-              {formatWeekday(selectedDate)}
-            </p>
-          </div>
+            <input
+              type="date"
+              value={selectedDate}
+              max={today}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="min-w-0 bg-transparent text-center text-base font-bold text-foreground outline-none"
+            />
+          </label>
 
           <button
             type="button"
-            onClick={goNextDay}
-            disabled={selectedDate >= today}
-            className="flex size-11 items-center justify-center rounded-2xl bg-muted active:bg-muted/70 disabled:opacity-30"
-            aria-label="下一天"
+            onClick={() => {
+              if (!isToday) setSelectedDate(nextDay)
+            }}
+            disabled={isToday}
+            className="flex size-11 shrink-0 items-center justify-center rounded-full bg-muted disabled:opacity-30"
+            aria-label="後一天"
           >
             <ChevronRight className="size-5" />
           </button>
         </div>
 
-        {/* 今天按鈕 */}
-        {selectedDate !== today ? (
-          <button
-            type="button"
-            onClick={() => setSelectedDate(today)}
-            className="mt-3 w-full rounded-2xl bg-primary/10 py-2.5 text-sm font-bold text-primary active:bg-primary/20"
-          >
-            回到今天
-          </button>
-        ) : null}
-      </section>
-
-      {/* 歷史日期快速選擇 */}
-      {historyDates.length > 0 ? (
-        <section className="space-y-2">
-          <p className="px-1 text-sm font-semibold text-secondary-foreground">
-            有紀錄的日期
+        <div className="mt-3 text-center">
+          <p className="text-lg font-black text-foreground">
+            {formatDate(selectedDate)}
           </p>
 
+          {!isToday ? (
+            <button
+              type="button"
+              onClick={() => setSelectedDate(today)}
+              className="mt-1 text-sm font-semibold text-primary"
+            >
+              回到今天
+            </button>
+          ) : null}
+        </div>
+      </section>
+
+      {/* 最近紀錄 */}
+      {recentDates.length > 0 ? (
+        <section className="rounded-3xl border border-border bg-card p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <CalendarDays className="size-5 text-primary" />
+            <h2 className="font-bold">最近紀錄</h2>
+          </div>
+
           <div className="flex gap-2 overflow-x-auto pb-1">
-            {historyDates.map((date) => {
+            {recentDates.map((date) => {
               const active = date === selectedDate
+              const record = data.days[date]
+              const recordTotals = sumDay(record)
 
               return (
                 <button
                   key={date}
                   type="button"
                   onClick={() => setSelectedDate(date)}
-                  className={
+                  className={`min-w-[92px] rounded-2xl border px-3 py-2 text-left transition ${
                     active
-                      ? "shrink-0 rounded-2xl bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground"
-                      : "shrink-0 rounded-2xl border border-border bg-card px-4 py-2.5 text-sm font-semibold text-foreground active:bg-muted"
-                  }
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border bg-background active:bg-muted"
+                  }`}
                 >
-                  {formatDate(date)}
+                  <p className="text-xs font-medium opacity-80">
+                    {date.slice(5).replace("-", "/")}
+                  </p>
+
+                  <p className="mt-1 text-sm font-bold">
+                    {record.weight
+                      ? `${record.weight} kg`
+                      : `${Math.round(recordTotals.calories)} kcal`}
+                  </p>
                 </button>
               )
             })}
@@ -194,157 +182,117 @@ export default function HistoryPage() {
 
       {/* 當日沒有資料 */}
       {!hasData ? (
-        <div className="rounded-3xl border border-dashed border-border bg-card px-5 py-10 text-center">
+        <section className="rounded-3xl border border-dashed border-border bg-card px-5 py-12 text-center">
           <CalendarDays className="mx-auto size-10 text-muted-foreground" />
 
-          <p className="mt-3 text-base font-semibold text-foreground">
+          <p className="mt-3 text-base font-bold text-foreground">
             這一天還沒有紀錄
           </p>
 
           <p className="mt-1 text-sm text-muted-foreground">
-            可以選擇其他日期查看飲食資料。
+            回到首頁即可新增今天的資料。
           </p>
-        </div>
+
+          <Link
+            href="/"
+            className="mt-5 inline-flex h-11 items-center justify-center rounded-2xl bg-primary px-5 text-sm font-bold text-primary-foreground"
+          >
+            回到首頁
+          </Link>
+        </section>
       ) : (
         <>
-          {/* 當日營養總計 */}
-          <section className="rounded-3xl border border-border bg-card p-4">
-            <h2 className="mb-3 text-base font-bold text-foreground">
-              {formatDate(selectedDate)} 營養總計
-            </h2>
+          {/* 每日營養摘要 */}
+          <section className="grid grid-cols-2 gap-3">
+            <SummaryCard
+              label="今日熱量"
+              value={Math.round(totals.calories)}
+              unit="kcal"
+            />
 
-            <div className="grid grid-cols-2 gap-3">
-              <Stat
-                label="總熱量"
-                value={Math.round(totals.calories)}
-                unit="kcal"
-              />
+            <SummaryCard
+              label="蛋白質"
+              value={Math.round(totals.protein)}
+              unit="g"
+            />
 
-              <Stat
-                label="蛋白質"
-                value={Math.round(totals.protein)}
-                unit="g"
-                primary
-              />
+            <SummaryCard
+              label="喝水"
+              value={day.water ?? 0}
+              unit="ml"
+            />
 
-              <Stat
-                label="碳水"
-                value={Math.round(totals.carbs)}
-                unit="g"
-              />
-
-              <Stat
-                label="脂肪"
-                value={Math.round(totals.fat)}
-                unit="g"
-              />
-            </div>
+            <SummaryCard
+              label="體重"
+              value={day.weight ?? 0}
+              unit="kg"
+            />
           </section>
 
           {/* 身體資料 */}
-          <section className="rounded-3xl border border-border bg-card p-4">
-            <h2 className="mb-3 text-base font-bold text-foreground">
-              身體紀錄
-            </h2>
+          <section className="rounded-3xl border border-border bg-card p-5">
+            <h2 className="mb-4 text-base font-bold">當日身體資料</h2>
 
             <div className="grid grid-cols-2 gap-3">
-              <BodyStat
+              <InfoItem
                 label="體重"
-                value={currentDay.weight}
-                unit="kg"
+                value={day.weight ? `${day.weight} kg` : "未記錄"}
               />
 
-              <BodyStat
+              <InfoItem
                 label="喝水"
-                value={currentDay.water}
-                unit="ml"
+                value={day.water ? `${day.water} ml` : "未記錄"}
               />
 
-              <BodyStat
+              <InfoItem
                 label="睡眠"
-                value={currentDay.sleep}
-                unit="小時"
+                value={day.sleep ? `${day.sleep} 小時` : "未記錄"}
               />
 
-              <BodyStat
+              <InfoItem
                 label="運動"
-                value={currentDay.exercise}
-                unit="分鐘"
+                value={
+                  day.exercise ? `${day.exercise} 分鐘` : "未記錄"
+                }
               />
             </div>
           </section>
 
           {/* 飲食紀錄 */}
           <section className="space-y-3">
-            <h2 className="px-1 text-base font-bold text-foreground">
-              當日飲食
-            </h2>
+            <div className="flex items-center justify-between px-1">
+              <h2 className="text-lg font-black">飲食紀錄</h2>
+
+              <span className="text-sm text-muted-foreground">
+                {day.meals.length} 筆
+              </span>
+            </div>
 
             {MEAL_ORDER.map((meal) => {
-              const items = currentDay.meals.filter(
-                (item) => item.meal === meal
+              const items = day.meals.filter(
+                (item) => item.meal === meal,
               )
 
               if (items.length === 0) return null
 
-              const mealCalories = Math.round(
-                items.reduce((sum, item) => sum + item.calories, 0)
+              const calories = items.reduce(
+                (sum, item) => sum + item.calories,
+                0,
               )
 
-              const mealProtein = Math.round(
-                items.reduce((sum, item) => sum + item.protein, 0)
+              const protein = items.reduce(
+                (sum, item) => sum + item.protein,
+                0,
               )
 
               return (
-                <section
+                <MealSection
                   key={meal}
-                  className="overflow-hidden rounded-3xl border border-border bg-card"
-                >
-                  <header className="flex items-center justify-between bg-muted/50 px-5 py-3">
-                    <h3 className="font-bold text-foreground">
-                      {MEAL_LABELS[meal]}
-                    </h3>
-
-                    <span className="text-xs text-muted-foreground">
-                      {mealCalories} kcal ・ 蛋白 {mealProtein}g
-                    </span>
-                  </header>
-
-                  <div className="divide-y divide-border">
-                    {items.map((item) => (
-                      <div
-                        key={item.id}
-                        className="flex items-center gap-3 px-5 py-3"
-                      >
-                        {item.photo ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={item.photo}
-                            alt={item.name}
-                            className="size-12 shrink-0 rounded-xl object-cover"
-                          />
-                        ) : null}
-
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-[15px] font-semibold text-foreground">
-                            {item.name}
-                          </p>
-
-                          <p className="text-xs text-muted-foreground">
-                            {item.portion} ・{" "}
-                            {Math.round(item.calories)} kcal
-                          </p>
-
-                          <p className="text-xs text-muted-foreground">
-                            蛋白 {Math.round(item.protein)}g ・ 碳{" "}
-                            {Math.round(item.carbs)}g ・ 脂{" "}
-                            {Math.round(item.fat)}g
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </section>
+                  meal={meal}
+                  items={items}
+                  calories={calories}
+                  protein={protein}
+                />
               )
             })}
           </section>
@@ -354,62 +302,125 @@ export default function HistoryPage() {
   )
 }
 
-function Stat({
+function SummaryCard({
   label,
   value,
   unit,
-  primary,
 }: {
   label: string
   value: number
   unit: string
-  primary?: boolean
 }) {
   return (
-    <div className="rounded-2xl bg-muted/50 p-3">
-      <p className="text-xs text-muted-foreground">{label}</p>
+    <div className="rounded-3xl border border-border bg-card p-4">
+      <p className="text-sm text-muted-foreground">{label}</p>
 
-      <p
-        className={
-          primary
-            ? "mt-1 text-2xl font-black text-primary"
-            : "mt-1 text-2xl font-black text-foreground"
-        }
-      >
-        {value}
-        <span className="ml-1 text-xs font-medium text-muted-foreground">
-          {unit}
+      <p className="mt-1 text-2xl font-black text-foreground">
+        {value || "--"}
+        <span className="ml-1 text-sm font-medium text-muted-foreground">
+          {value ? unit : ""}
         </span>
       </p>
     </div>
   )
 }
 
-function BodyStat({
+function InfoItem({
   label,
   value,
-  unit,
 }: {
   label: string
-  value?: number
-  unit: string
+  value: string
 }) {
   return (
-    <div className="rounded-2xl bg-muted/50 p-3">
+    <div className="rounded-2xl bg-muted/50 px-4 py-3">
       <p className="text-xs text-muted-foreground">{label}</p>
-
-      {value !== undefined ? (
-        <p className="mt-1 text-xl font-black text-foreground">
-          {value}
-          <span className="ml-1 text-xs font-medium text-muted-foreground">
-            {unit}
-          </span>
-        </p>
-      ) : (
-        <p className="mt-1 text-sm font-medium text-muted-foreground">
-          尚未記錄
-        </p>
-      )}
+      <p className="mt-1 text-base font-bold text-foreground">{value}</p>
     </div>
+  )
+}
+
+function MealSection({
+  meal,
+  items,
+  calories,
+  protein,
+}: {
+  meal: MealType
+  items: {
+    id: string
+    name: string
+    portion: string
+    calories: number
+    protein: number
+    carbs: number
+    fat: number
+  }[]
+  calories: number
+  protein: number
+}) {
+  const [open, setOpen] = useState(true)
+
+  return (
+    <section className="overflow-hidden rounded-3xl border border-border bg-card">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between bg-muted/50 px-5 py-4 text-left"
+      >
+        <div>
+          <h3 className="font-bold">{MEAL_LABELS[meal]}</h3>
+
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {Math.round(calories)} kcal ・ 蛋白質{" "}
+            {Math.round(protein)} g
+          </p>
+        </div>
+
+        <ChevronDown
+          className={`size-5 transition-transform ${
+            open ? "rotate-180" : ""
+          }`}
+        />
+      </button>
+
+      {open ? (
+        <div className="divide-y divide-border">
+          {items.map((item) => (
+            <div
+              key={item.id}
+              className="px-5 py-3"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-base font-bold">
+                    {item.name}
+                  </p>
+
+                  <p className="mt-0.5 text-sm text-muted-foreground">
+                    {item.portion}
+                  </p>
+                </div>
+
+                <div className="shrink-0 text-right">
+                  <p className="font-bold">
+                    {Math.round(item.calories)} kcal
+                  </p>
+
+                  <p className="text-xs text-muted-foreground">
+                    蛋白 {Math.round(item.protein)}g
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-2 text-xs text-muted-foreground">
+                碳水 {Math.round(item.carbs)}g ・ 脂肪{" "}
+                {Math.round(item.fat)}g
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
   )
 }
